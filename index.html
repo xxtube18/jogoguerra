@@ -2,12 +2,12 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Defesa Litorânea - Versão Final de Combate</title>
+    <title>Defesa Litorânea - Elite Combat</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; color: #0f0; font-family: monospace; }
-        #hud { position: absolute; top: 20px; left: 20px; border: 2px solid #0f0; padding: 10px; background: rgba(0,0,0,0.8); z-index: 10; }
+        #hud { position: absolute; top: 20px; left: 20px; border: 2px solid #0f0; padding: 15px; background: rgba(0,20,0,0.8); z-index: 10; }
         #crosshair { 
-            position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; 
+            position: absolute; top: 50%; left: 50%; width: 25px; height: 25px; 
             border: 2px solid #f00; border-radius: 50%; transform: translate(-50%, -50%); 
             display: none; pointer-events: none;
         }
@@ -16,11 +16,11 @@
 <body>
 
 <div id="hud">
-    <div>ESTADO: EM COMBATE</div>
+    <div>ESTADO: DEFESA ATIVA</div>
     <hr>
-    <div>TRAVAR MOUSE: [TECLA 1] | USAR ARMA: [E]</div>
-    <div>TIRO: [CLIQUE] | RAJADA: [SEGURAR RATO]</div>
-    <div>AVIÕES ABATIDOS: <span id="score">0</span></div>
+    <div>TRAVAR MOUSE: [1] | ENTRAR NA TURRET: [E]</div>
+    <div>MOVIMENTAÇÃO: [W,A,S,D] | DISPARAR: [CLIQUE]</div>
+    <div>SCORE: <span id="score">0</span></div>
 </div>
 <div id="crosshair"></div>
 
@@ -33,44 +33,36 @@
     import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x00050a);
+    scene.background = new THREE.Color(0x02050a);
+
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    
+    // --- CONFIGURAÇÃO PARA AS TEXTURAS APARECEREM ---
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
     document.body.appendChild(renderer.domElement);
 
-    // Sistema de Áudio
-    const listener = new THREE.AudioListener();
-    camera.add(listener);
-    const somTiro = new THREE.Audio(listener);
-    const audioLoader = new THREE.AudioLoader();
-    audioLoader.load('./shot.mp3', (buffer) => {
-        somTiro.setBuffer(buffer);
-        somTiro.setVolume(0.4);
-    });
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-    const luz = new THREE.DirectionalLight(0xaabbff, 1.5);
-    luz.position.set(50, 100, 50);
-    scene.add(luz);
-
-    // Material Metálico para garantir textura
-    const matMetal = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8, roughness: 0.2 });
+    // --- ILUMINAÇÃO (Essencial para as texturas dos GLBs) ---
+    const light = new THREE.AmbientLight(0xffffff, 1.5); 
+    scene.add(light);
+    const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+    sun.position.set(10, 20, 10);
+    scene.add(sun);
 
     const loader = new GLTFLoader();
     let soldado, arma, pontoTiro, mixer;
-    let operando = false;
-    let disparando = false;
-    let tempoUltimaRajada = 0;
-    let yaw = 0, pitch = 0;
-    let inimigos = [], balas = [], misseisInimigos = [], teclas = {};
-    let score = 0;
+    let operando = false, disparando = false;
+    let yaw = 0, pitch = 0, score = 0;
+    let inimigos = [], balas = [], teclas = {};
 
     // 1. Carregar Soldado
     loader.load('./Military man.glb', (gltf) => {
         soldado = gltf.scene;
         soldado.scale.set(3.5, 3.5, 3.5);
-        soldier.position.set(0, -5, 0);
+        soldado.position.set(0, -5, 0);
         scene.add(soldado);
         if(gltf.animations.length > 0) {
             mixer = new THREE.AnimationMixer(soldado);
@@ -78,50 +70,49 @@
         }
     });
 
-    // 2. Carregar Turret Principal
+    // 2. Carregar Turret (Missile Turret.glb)
     loader.load('./Missile Turret.glb', (gltf) => {
         arma = gltf.scene;
-        arma.traverse(c => { if(c.isMesh) c.material = matMetal; });
         arma.scale.set(4, 4, 4);
         arma.position.set(0, -5, -15);
         pontoTiro = new THREE.Group();
-        pontoTiro.position.set(0, 5, -10);
+        pontoTiro.position.set(0, 5, -10); // Ajuste conforme o modelo
         arma.add(pontoTiro);
         scene.add(arma);
     });
 
-    // 3. Sistema de IA Inimiga (Aparência e Ataque)
-    function criarInimigo() {
-        // Criamos um modelo de avião (se não houver .glb, criamos um visual melhorado)
-        const grupoAviao = new THREE.Group();
-        const corpo = new THREE.Mesh(new THREE.BoxGeometry(10, 2, 4), matMetal);
-        const asas = new THREE.Mesh(new THREE.BoxGeometry(2, 0.5, 12), matMetal);
-        grupoAviao.add(corpo, asas);
+    // 3. Sistema de IA com seus modelos (Jet e Helicopter)
+    function spawnInimigo() {
+        const modelos = ['./Jet.glb', './Helicopter.glb'];
+        const modeloSorteado = modelos[Math.floor(Math.random() * modelos.length)];
         
-        // Altura acessível para a turret (15 a 30)
-        grupoAviao.position.set(Math.random() * 400 - 200, 15 + Math.random() * 15, -700);
-        scene.add(grupoAviao);
-        inimigos.push({ mesh: grupoAviao, ultimoTiro: 0 });
+        loader.load(modeloSorteado, (gltf) => {
+            const mesh = gltf.scene;
+            mesh.position.set(Math.random() * 600 - 300, 20 + Math.random() * 20, -800);
+            mesh.scale.set(6, 6, 6);
+            scene.add(mesh);
+            inimigos.push({ mesh: mesh, speed: 1.5 + Math.random() });
+        });
     }
-    for(let i=0; i<5; i++) criarInimigo();
+    for(let i=0; i<5; i++) spawnInimigo();
 
-    // Controles de Disparo
-    window.addEventListener('mousedown', () => { disparando = true; });
-    window.addEventListener('mouseup', () => { disparando = false; });
-
+    // 4. Lógica de Disparo
     function disparar() {
         if (!operando || !arma) return;
-        if (somTiro.isPlaying) somTiro.stop();
-        somTiro.play();
-
-        const b = new THREE.Mesh(new THREE.SphereGeometry(0.6), new THREE.MeshBasicMaterial({color: 0x00ff00}));
-        b.position.setFromMatrixPosition(pontoTiro.matrixWorld);
+        const b = new THREE.Mesh(
+            new THREE.SphereGeometry(0.5), 
+            new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+        );
+        const posMatriz = new THREE.Vector3();
+        pontoTiro.getWorldPosition(posMatriz);
+        b.position.copy(posMatriz);
+        
         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(arma.quaternion);
         balas.push({ mesh: b, vel: dir.multiplyScalar(15) });
         scene.add(b);
     }
 
-    // Teclado e Mouse Lock
+    // Controles
     window.addEventListener('keydown', (e) => {
         if (e.key === '1') renderer.domElement.requestPointerLock();
         if (e.code === 'KeyE') {
@@ -131,83 +122,67 @@
         teclas[e.code] = true;
     });
     window.addEventListener('keyup', (e) => teclas[e.code] = false);
-
+    window.addEventListener('mousedown', () => disparando = true);
+    window.addEventListener('mouseup', () => disparando = false);
     document.addEventListener('mousemove', (e) => {
         if (document.pointerLockElement === renderer.domElement) {
             yaw -= e.movementX * 0.002;
             pitch -= e.movementY * 0.002;
-            pitch = Math.max(-0.6, Math.min(0.6, pitch));
+            pitch = Math.max(-0.5, Math.min(0.5, pitch));
         }
     });
 
-    const relogio = new THREE.Clock();
-
     function animate() {
         requestAnimationFrame(animate);
-        const delta = relogio.getDelta();
-        const tempoTotal = relogio.getElapsedTime();
+        const delta = 0.016;
         if (mixer) mixer.update(delta);
 
-        // Lógica de Rajada
-        if (disparando && tempoTotal - tempoUltimaRajada > 0.12) {
-            disparar();
-            tempoUltimaRajada = tempoTotal;
-        }
+        if (disparando && Math.random() > 0.8) disparar();
 
+        // Movimento do Soldado (Livre)
         if (soldado && !operando) {
             soldado.rotation.y = yaw;
-            if (teclas['KeyW']) soldado.translateZ(0.25);
+            if (teclas['KeyW']) soldado.translateZ(0.3);
             if (teclas['KeyS']) soldado.translateZ(-0.2);
-            if (teclas['KeyA']) soldado.translateX(0.15);
-            if (teclas['KeyD']) soldado.translateX(-0.15);
-
-            const offsetCam = new THREE.Vector3(6, 14, -28).applyQuaternion(soldado.quaternion);
-            camera.position.lerp(soldado.position.clone().add(offsetCam), 0.1);
-            camera.lookAt(soldado.position.x, soldado.position.y + 10, soldado.position.z);
+            camera.position.lerp(new THREE.Vector3(soldado.position.x, soldado.position.y + 12, soldado.position.z + 25), 0.1);
+            camera.lookAt(soldado.position);
         }
 
+        // Controle da Turret
         if (operando && arma) {
             arma.rotation.y = yaw;
-            camera.position.copy(new THREE.Vector3(0, 13, 5).applyMatrix4(arma.matrixWorld));
-            camera.lookAt(new THREE.Vector3(0, 10 + (pitch * 60), -100).applyMatrix4(arma.matrixWorld));
+            arma.rotation.x = pitch; // Inclinação da arma
+            camera.position.copy(new THREE.Vector3(0, 15, 8).applyMatrix4(arma.matrixWorld));
+            camera.lookAt(new THREE.Vector3(0, 10, -100).applyMatrix4(arma.matrixWorld));
         }
 
-        // Movimento de Inimigos e Ataque à Base
-        inimigos.forEach((en) => {
-            en.mesh.position.z += 2.0;
-            
-            // Avião atira míssil na base
-            if (tempoTotal - en.ultimoTiro > 4 && en.mesh.position.z < -100) {
-                const missil = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 3), new THREE.MeshBasicMaterial({color: 0xff0000}));
-                missil.position.copy(en.mesh.position);
-                missil.rotation.x = Math.PI/2;
-                misseisInimigos.push({ mesh: missil, vel: new THREE.Vector3(0, 0, 4) });
-                scene.add(missil);
-                en.ultimoTiro = tempoTotal;
-            }
-
-            // Loop de ataque: se passar, volta para o fundo
-            if (en.mesh.position.z > 150) {
-                en.mesh.position.z = -800;
-                en.mesh.position.x = Math.random() * 400 - 200;
+        // Atualizar Balas
+        balas.forEach((b, i) => {
+            b.mesh.position.add(b.vel);
+            if (b.mesh.position.z < -1000) {
+                scene.remove(b.mesh);
+                balas.splice(i, 1);
             }
         });
 
-        // Colisões (Derrubar aviões)
-        balas.forEach((b, bi) => {
-            b.mesh.position.add(b.vel);
-            inimigos.forEach((en) => {
-                if (b.mesh.position.distanceTo(en.mesh.position) < 18) {
-                    en.mesh.position.z = -800; // Abatido!
+        // Atualizar Inimigos e Colisão
+        inimigos.forEach((en, ei) => {
+            en.mesh.position.z += en.speed;
+            
+            // Checar colisão com balas
+            balas.forEach((b, bi) => {
+                if (b.mesh.position.distanceTo(en.mesh.position) < 15) {
+                    en.mesh.position.z = -800; // Reset inimigo
+                    en.mesh.position.x = Math.random() * 600 - 300;
                     scene.remove(b.mesh);
                     balas.splice(bi, 1);
                     score++;
                     document.getElementById('score').innerText = score;
                 }
             });
-        });
 
-        misseisInimigos.forEach((m, mi) => m.mesh.position.add(m.vel));
+            if (en.mesh.position.z > 50) en.mesh.position.z = -800;
+        });
 
         renderer.render(scene, camera);
     }
