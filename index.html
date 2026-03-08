@@ -2,10 +2,10 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Defesa Litorânea - Operação Noturna</title>
+    <title>Defesa Litorânea - Modo Rajada</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; color: #0f0; font-family: monospace; }
-        #hud { position: absolute; top: 20px; left: 20px; border: 2px solid #0f0; padding: 10px; background: rgba(0,0,0,0.8); z-index: 10; }
+        #hud { position: absolute; top: 20px; left: 20px; border: 1px solid #0f0; padding: 10px; background: rgba(0,0,0,0.8); z-index: 10; }
         #crosshair { 
             position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; 
             border: 2px solid #f00; border-radius: 50%; transform: translate(-50%, -50%); 
@@ -16,11 +16,11 @@
 <body>
 
 <div id="hud">
-    <div>COMANDO DE DEFESA</div>
+    <div>SISTEMA DE ARMAS: ONLINE</div>
     <hr>
-    <div>MOUSE FIXO: [TECLA 1]</div>
-    <div>USAR ARMA: [TECLA E]</div>
-    <div>INIMIGOS NO CÉU: <span id="count">0</span></div>
+    <div>TRAVAR MOUSE: [TECLA 1]</div>
+    <div>TIRO: [CLIQUE] | RAJADA: [SEGURAR]</div>
+    <div>INIMIGOS ABAIXO DO LIMITE: SIM</div>
 </div>
 <div id="crosshair"></div>
 
@@ -31,39 +31,37 @@
 <script type="module">
     import * as THREE from 'three';
     import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-    import { OBJLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
-    import { MTLLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x00050a);
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Iluminação para destacar o metal
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    const moon = new THREE.DirectionalLight(0xaabbff, 1.5);
-    moon.position.set(50, 100, 50);
-    scene.add(moon);
-
-    // MATERIAL DE METAL (Para quando falta a imagem/textura)
-    const metalMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x555555, 
-        metalness: 0.9, 
-        roughness: 0.2 
+    // Audio Setup
+    const listener = new THREE.AudioListener();
+    camera.add(listener);
+    const shotSound = new THREE.Audio(listener);
+    const audioLoader = new THREE.AudioLoader();
+    audioLoader.load('./shot.mp3', (buffer) => {
+        shotSound.setBuffer(buffer);
+        shotSound.setVolume(0.5);
     });
 
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const light = new THREE.DirectionalLight(0xaabbff, 1.5);
+    light.position.set(50, 100, 50);
+    scene.add(light);
+
     const loader = new GLTFLoader();
-    const objLoader = new OBJLoader();
-    const mtlLoader = new MTLLoader();
-    
     let soldier, myTurret, firePoint, mixer;
     let isOperating = false;
+    let isShooting = false;
+    let lastBurstTime = 0;
     let yaw = 0, pitch = 0;
-    let enemies = [], bullets = [], keys = {};
+    let enemies = [], bullets = [], enemyMissiles = [], keys = {};
 
-    // 1. CARREGAR MILITAR
+    // 1. Carregar Soldado
     loader.load('./Military man.glb', (gltf) => {
         soldier = gltf.scene;
         soldier.scale.set(3.5, 3.5, 3.5);
@@ -75,25 +73,9 @@
         }
     });
 
-    // 2. CARREGAR CENÁRIO (Aplicando Metal onde falta textura)
-    mtlLoader.load('./stage design.mtl', (mtl) => {
-        mtl.preload();
-        objLoader.setMaterials(mtl).load('./stage design.obj', (obj) => {
-            obj.traverse((child) => {
-                if (child.isMesh) child.material = metalMaterial;
-            });
-            obj.scale.set(0.6, 0.6, 0.6);
-            obj.position.y = -5;
-            scene.add(obj);
-        });
-    });
-
-    // 3. CARREGAR TURRET
+    // 2. Carregar Turret
     loader.load('./Missile Turret.glb', (gltf) => {
         myTurret = gltf.scene;
-        myTurret.traverse((child) => {
-            if (child.isMesh) child.material = metalMaterial;
-        });
         myTurret.scale.set(4, 4, 4);
         myTurret.position.set(0, -5, -15);
         firePoint = new THREE.Group();
@@ -102,25 +84,44 @@
         scene.add(myTurret);
     });
 
-    // 4. SISTEMA DE INIMIGOS (AVIÕES)
+    // 3. IA de Inimigos (Ataque e Volta)
     function spawnEnemy() {
-        const enemyGeo = new THREE.BoxGeometry(15, 3, 6);
-        const enemyMat = new THREE.MeshPhongMaterial({ color: 0xff0000, emissive: 0x440000 });
-        const enemy = new THREE.Mesh(enemyGeo, enemyMat);
-        enemy.position.set(Math.random() * 500 - 250, 50 + Math.random() * 40, -800);
-        scene.add(enemy);
-        enemies.push(enemy);
+        loader.load('./airplane.glb', (gltf) => {
+            const enemy = gltf.scene;
+            enemy.scale.set(6, 6, 6);
+            // Altura corrigida para ficar na mira
+            enemy.position.set(Math.random() * 400 - 200, 15 + Math.random() * 10, -800);
+            scene.add(enemy);
+            enemies.push({ mesh: enemy, lastShot: 0 });
+        });
     }
-    setInterval(spawnEnemy, 2500);
+    for(let i=0; i<6; i++) spawnEnemy();
 
-    // CONTROLES
+    // Controles de Disparo
+    window.addEventListener('mousedown', () => { isShooting = true; });
+    window.addEventListener('mouseup', () => { isShooting = false; });
+
+    function fire() {
+        if (!isOperating || !myTurret) return;
+        
+        // Tocar Som
+        if (shotSound.isPlaying) shotSound.stop();
+        shotSound.play();
+
+        const b = new THREE.Mesh(new THREE.SphereGeometry(0.6), new THREE.MeshBasicMaterial({color: 0x00ff00}));
+        b.position.setFromMatrixPosition(firePoint.matrixWorld);
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(myTurret.quaternion);
+        bullets.push({ mesh: b, vel: dir.multiplyScalar(15) });
+        scene.add(b);
+    }
+
     window.addEventListener('keydown', (e) => {
-        keys[e.code] = true;
         if (e.key === '1') renderer.domElement.requestPointerLock();
         if (e.code === 'KeyE') {
             isOperating = !isOperating;
             document.getElementById('crosshair').style.display = isOperating ? 'block' : 'none';
         }
+        keys[e.code] = true;
     });
     window.addEventListener('keyup', (e) => keys[e.code] = false);
 
@@ -128,17 +129,6 @@
         if (document.pointerLockElement === renderer.domElement) {
             yaw -= e.movementX * 0.002;
             pitch -= e.movementY * 0.002;
-            pitch = Math.max(-0.6, Math.min(0.6, pitch));
-        }
-    });
-
-    window.addEventListener('mousedown', () => {
-        if (isOperating && myTurret) {
-            const b = new THREE.Mesh(new THREE.SphereGeometry(0.6), new THREE.MeshBasicMaterial({color: 0x00ff00}));
-            b.position.setFromMatrixPosition(firePoint.matrixWorld);
-            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(myTurret.quaternion);
-            bullets.push({ mesh: b, vel: dir.multiplyScalar(10) });
-            scene.add(b);
         }
     });
 
@@ -147,49 +137,58 @@
     function animate() {
         requestAnimationFrame(animate);
         const delta = clock.getDelta();
+        const time = clock.getElapsedTime();
         if (mixer) mixer.update(delta);
+
+        // Lógica de Rajada (Se segurar o mouse, atira a cada 0.1s)
+        if (isShooting && time - lastBurstTime > 0.1) {
+            fire();
+            lastBurstTime = time;
+        }
 
         if (soldier && !isOperating) {
             soldier.rotation.y = yaw;
-            if (keys['KeyW']) soldier.translateZ(0.2);
-            if (keys['KeyS']) soldier.translateZ(-0.15);
-            if (keys['KeyA']) soldier.translateX(0.15);
-            if (keys['KeyD']) soldier.translateX(-0.15);
-
-            const camPos = new THREE.Vector3(6, 14, -25).applyQuaternion(soldier.quaternion);
+            if (keys['KeyW']) soldier.translateZ(0.25);
+            if (keys['KeyS']) soldier.translateZ(-0.2);
+            const camPos = new THREE.Vector3(6, 14, -28).applyQuaternion(soldier.quaternion);
             camera.position.lerp(soldier.position.clone().add(camPos), 0.1);
             camera.lookAt(soldier.position.x, soldier.position.y + 10, soldier.position.z);
         }
 
         if (isOperating && myTurret) {
             myTurret.rotation.y = yaw;
-            const tCam = new THREE.Vector3(0, 13, 5).applyMatrix4(myTurret.matrixWorld);
-            camera.position.copy(tCam);
+            camera.position.copy(new THREE.Vector3(0, 13, 5).applyMatrix4(myTurret.matrixWorld));
             camera.lookAt(new THREE.Vector3(0, 10 + (pitch * 60), -100).applyMatrix4(myTurret.matrixWorld));
         }
 
-        // Movimento de Inimigos e Balas
-        enemies.forEach((en, i) => {
-            en.position.z += 2.5;
-            if (en.position.z > 200) {
-                scene.remove(en);
-                enemies.splice(i, 1);
+        // IA: Aviões atacam e voltam
+        enemies.forEach((en) => {
+            en.mesh.position.z += 2.5; 
+            if (time - en.lastShot > 3 && en.mesh.position.z < -50) {
+                const m = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 2), new THREE.MeshBasicMaterial({color: 0xff0000}));
+                m.position.copy(en.mesh.position);
+                enemyMissiles.push({ mesh: m, vel: new THREE.Vector3(0, 0, 4) });
+                scene.add(m);
+                en.lastShot = time;
+            }
+            if (en.mesh.position.z > 150) { // Volta para o início para atacar de novo
+                en.mesh.position.z = -800;
+                en.mesh.position.x = Math.random() * 400 - 200;
             }
         });
 
+        // Balas e Colisões
         bullets.forEach((b, bi) => {
             b.mesh.position.add(b.vel);
-            enemies.forEach((en, ei) => {
-                if (b.mesh.position.distanceTo(en.position) < 15) {
-                    scene.remove(en);
+            enemies.forEach((en) => {
+                if (b.mesh.position.distanceTo(en.mesh.position) < 18) {
+                    en.mesh.position.z = -800; // Avião "abatido" volta pro fundo
                     scene.remove(b.mesh);
-                    enemies.splice(ei, 1);
                     bullets.splice(bi, 1);
                 }
             });
         });
 
-        document.getElementById('count').innerText = enemies.length;
         renderer.render(scene, camera);
     }
     animate();
