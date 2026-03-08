@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Defesa Aérea 100% - Tactical Command</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        #hud { position: absolute; top: 20px; left: 20px; color: #0f0; pointer-events: none; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; border: 2px solid #0f0; border-radius: 50%; transform: translate(-50%, -50%); display: none; }
+        .info { background: rgba(0,20,0,0.7); padding: 10px; border: 1px solid #0f0; margin-bottom: 5px; }
+        #wave-alert { position: absolute; top: 20%; width: 100%; text-align: center; color: #f00; font-size: 30px; display: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="hud">
+    <div class="info">SISTEMA: <span id="modo">OBSERVADOR</span></div>
+    <div class="info">ONDA: <span id="onda-num">0</span> | INIMIGOS: <span id="inimigos-total">0</span></div>
+    <div class="info">SCORE: <span id="score">0</span></div>
+    <div style="font-size: 12px;">[E] ENTRAR NA TURRET | [CLIQUE] DISPARAR</div>
+</div>
+<div id="crosshair"></div>
+<div id="wave-alert">ALERTA: AVIÕES INIMIGOS DETETADOS!</div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+    import { OBJLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+    import { MTLLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
+
+    // CONFIGURAÇÃO DO ENGINE
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x000000, 0.002);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const light = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(light);
+    const sun = new THREE.DirectionalLight(0xffffff, 2);
+    sun.position.set(50, 100, 50);
+    scene.add(sun);
+
+    // VARIÁVEIS DE JOGO
+    let turrets = []; // Lista de todas as armas (Aliadas + Jogador)
+    let currentTurretIndex = -1;
+    let isControlling = false;
+    let enemies = [];
+    let bullets = [];
+    let score = 0;
+
+    // DEFINIÇÃO DAS ONDAS (Aqui você controla o número de aviões)
+    const waveConfig = [
+        { enemies: 5, speed: 1.2, delay: 5000 },
+        { enemies: 15, speed: 2.0, delay: 4000 },
+        { enemies: 30, speed: 3.5, delay: 2000 }
+    ];
+    let currentWave = 0;
+
+    const loader = new GLTFLoader();
+    const objLoader = new OBJLoader();
+    const mtlLoader = new MTLLoader();
+
+    // 1. CARREGAR CENÁRIO
+    mtlLoader.load('./assets/stage design.mtl', (mtl) => {
+        mtl.preload();
+        objLoader.setMaterials(mtl).load('./assets/stage design.obj', (obj) => {
+            obj.scale.set(0.5, 0.5, 0.5);
+            obj.position.y = -5;
+            scene.add(obj);
+        });
+    });
+
+    // 2. CARREGAR ARMAS E POSICIONAR (Jogador e Aliados)
+    function createTurret(x, z, isAlly) {
+        loader.load('./assets/Missile Turret.glb', (gltf) => {
+            const t = gltf.scene;
+            t.position.set(x, -2, z);
+            t.scale.set(3, 3, 3);
+            t.userData = { isAlly: isAlly, lastFire: 0 };
+            scene.add(t);
+            turrets.push(t);
+        });
+    }
+
+    createTurret(0, 0, false);   // Sua arma principal
+    createTurret(50, 0, true);  // Aliado 1
+    createTurret(-50, 0, true); // Aliado 2
+
+    // SISTEMA DE TIRO
+    function fire(turretInstance) {
+        const now = Date.now();
+        if (now - turretInstance.userData.lastFire < 500) return; // Cooldown 0.5s
+
+        const bullet = new THREE.Mesh(
+            new THREE.SphereGeometry(0.5),
+            new THREE.MeshBasicMaterial({ color: 0xffff00 })
+        );
+        
+        bullet.position.copy(turretInstance.position);
+        bullet.position.y += 6;
+
+        const direction = new THREE.Vector3(0, 0, -1);
+        direction.applyQuaternion(turretInstance.quaternion);
+        
+        bullets.push({ mesh: bullet, velocity: direction.multiplyScalar(5) });
+        scene.add(bullet);
+        turretInstance.userData.lastFire = now;
+    }
+
+    // INPUTS
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyE') {
+            isControlling = !isControlling;
+            if (isControlling) {
+                currentTurretIndex = 0; // Entra na primeira turret
+                renderer.domElement.requestPointerLock();
+                document.getElementById('modo').innerText = "MANUAL";
+                document.getElementById('crosshair').style.display = 'block';
+            } else {
+                document.exitPointerLock();
+                document.getElementById('modo').innerText = "OBSERVADOR";
+                document.getElementById('crosshair').style.display = 'none';
+            }
+        }
+    });
+
+    window.addEventListener('mousedown', () => {
+        if (isControlling && turrets[currentTurretIndex]) {
+            fire(turrets[currentTurretIndex]);
+        }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (isControlling && turrets[currentTurretIndex]) {
+            turrets[currentTurretIndex].rotation.y -= e.movementX * 0.003;
+        }
+    });
+
+    // SISTEMA DE INIMIGOS E ONDAS
+    function spawnWave() {
+        if (currentWave >= waveConfig.length) return;
+        
+        const config = waveConfig[currentWave];
+        document.getElementById('wave-alert').style.display = 'block';
+        document.getElementById('onda-num').innerText = currentWave + 1;
+
+        setTimeout(() => {
+            document.getElementById('wave-alert').style.display = 'none';
+            for (let i = 0; i < config.enemies; i++) {
+                setTimeout(() => {
+                    const geometry = new THREE.BoxGeometry(5, 2, 8);
+                    const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+                    const enemy = new THREE.Mesh(geometry, material);
+                    enemy.position.set(Math.random() * 600 - 300, 40, -600 - (i * 20));
+                    scene.add(enemy);
+                    enemies.push({ mesh: enemy, speed: config.speed });
+                }, i * 1000);
+            }
+            currentWave++;
+        }, 2000);
+    }
+
+    // LOOP PRINCIPAL
+    function animate() {
+        requestAnimationFrame(animate);
+
+        // 1. Mover Inimigos
+        enemies.forEach((enemy, eIdx) => {
+            enemy.mesh.position.z += enemy.speed;
+            if (enemy.mesh.position.z > 100) {
+                scene.remove(enemy.mesh);
+                enemies.splice(eIdx, 1);
+            }
+        });
+
+        // 2. Mover Balas e Checar Colisão
+        bullets.forEach((b, bIdx) => {
+            b.mesh.position.add(b.velocity);
+
+            enemies.forEach((e, eIdx) => {
+                if (b.mesh.position.distanceTo(e.mesh.position) < 8) {
+                    scene.remove(e.mesh);
+                    scene.remove(b.mesh);
+                    enemies.splice(eIdx, 1);
+                    bullets.splice(bIdx, 1);
+                    score += 100;
+                    document.getElementById('score').innerText = score;
+                }
+            });
+
+            if (b.mesh.position.z < -1000) {
+                scene.remove(b.mesh);
+                bullets.splice(bIdx, 1);
+            }
+        });
+
+        // 3. IA Aliada (Atira no inimigo mais próximo)
+        turrets.forEach(t => {
+            if (t.userData.isAlly && enemies.length > 0) {
+                t.lookAt(enemies[0].mesh.position);
+                fire(t);
+            }
+        });
+
+        // 4. Câmera
+        if (isControlling && turrets[currentTurretIndex]) {
+            const turret = turrets[currentTurretIndex];
+            const offset = new THREE.Vector3(0, 10, 25).applyQuaternion(turret.quaternion);
+            camera.position.copy(turret.position).add(offset);
+            camera.lookAt(turret.position.x, turret.position.y + 5, turret.position.z - 50);
+        } else {
+            camera.position.lerp(new THREE.Vector3(80, 60, 100), 0.05);
+            camera.lookAt(0, 0, 0);
+        }
+
+        document.getElementById('inimigos-total').innerText = enemies.length;
+        if (enemies.length === 0 && currentWave < waveConfig.length) spawnWave();
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+</script>
+</body>
+</html>
