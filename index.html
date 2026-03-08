@@ -2,21 +2,25 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Defesa Litorânea - Visão de Combate</title>
+    <title>Defesa Litorânea - Operação Noturna</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; color: #0f0; font-family: 'Courier New', monospace; }
-        #hud { position: absolute; top: 20px; left: 20px; border: 1px solid #0f0; padding: 10px; background: rgba(0,20,0,0.8); z-index: 10; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; border: 2px solid #f00; border-radius: 50%; transform: translate(-50%, -50%); display: none; }
+        body { margin: 0; overflow: hidden; background: #000; color: #0f0; font-family: monospace; }
+        #hud { position: absolute; top: 20px; left: 20px; border: 2px solid #0f0; padding: 10px; background: rgba(0,0,0,0.8); z-index: 10; }
+        #crosshair { 
+            position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; 
+            border: 2px solid #f00; border-radius: 50%; transform: translate(-50%, -50%); 
+            display: none; pointer-events: none;
+        }
     </style>
 </head>
 <body>
 
 <div id="hud">
-    <div>COMANDO OPERACIONAL</div>
+    <div>COMANDO DE DEFESA</div>
     <hr>
-    <div>TRAVAR MOUSE: [TECLA 1]</div>
-    <div>ENTRAR/SAIR DA ARMA: [TECLA E]</div>
-    <div>MOVIMENTO: [W,A,S,D]</div>
+    <div>MOUSE FIXO: [TECLA 1]</div>
+    <div>USAR ARMA: [TECLA E]</div>
+    <div>INIMIGOS NO CÉU: <span id="count">0</span></div>
 </div>
 <div id="crosshair"></div>
 
@@ -37,46 +41,79 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    // Iluminação para destacar o metal
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
     const moon = new THREE.DirectionalLight(0xaabbff, 1.5);
-    moon.position.set(20, 50, 20);
+    moon.position.set(50, 100, 50);
     scene.add(moon);
 
-    const loader = new GLTFLoader();
-    let soldier, mixer, myTurret, firePoint;
-    let isOperating = false;
-    let keys = {};
-    let rotationY = 0; // Rotação horizontal do mouse
-    let rotationX = 0; // Rotação vertical do mouse
-    let bullets = [];
+    // MATERIAL DE METAL (Para quando falta a imagem/textura)
+    const metalMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x555555, 
+        metalness: 0.9, 
+        roughness: 0.2 
+    });
 
-    // 1. CARREGAR PERSONAGEM
+    const loader = new GLTFLoader();
+    const objLoader = new OBJLoader();
+    const mtlLoader = new MTLLoader();
+    
+    let soldier, myTurret, firePoint, mixer;
+    let isOperating = false;
+    let yaw = 0, pitch = 0;
+    let enemies = [], bullets = [], keys = {};
+
+    // 1. CARREGAR MILITAR
     loader.load('./Military man.glb', (gltf) => {
         soldier = gltf.scene;
         soldier.scale.set(3.5, 3.5, 3.5);
         soldier.position.set(0, -5, 0);
         scene.add(soldier);
-
-        // Ativar Animações (Tira a T-Pose)
-        if (gltf.animations.length > 0) {
+        if(gltf.animations.length > 0) {
             mixer = new THREE.AnimationMixer(soldier);
             mixer.clipAction(gltf.animations[0]).play();
         }
     });
 
-    // 2. CARREGAR ARMA
+    // 2. CARREGAR CENÁRIO (Aplicando Metal onde falta textura)
+    mtlLoader.load('./stage design.mtl', (mtl) => {
+        mtl.preload();
+        objLoader.setMaterials(mtl).load('./stage design.obj', (obj) => {
+            obj.traverse((child) => {
+                if (child.isMesh) child.material = metalMaterial;
+            });
+            obj.scale.set(0.6, 0.6, 0.6);
+            obj.position.y = -5;
+            scene.add(obj);
+        });
+    });
+
+    // 3. CARREGAR TURRET
     loader.load('./Missile Turret.glb', (gltf) => {
         myTurret = gltf.scene;
+        myTurret.traverse((child) => {
+            if (child.isMesh) child.material = metalMaterial;
+        });
         myTurret.scale.set(4, 4, 4);
-        myTurret.position.set(0, -5, -20);
-        
+        myTurret.position.set(0, -5, -15);
         firePoint = new THREE.Group();
-        firePoint.position.set(0, 5, -5);
+        firePoint.position.set(0, 5, -10);
         myTurret.add(firePoint);
         scene.add(myTurret);
     });
 
-    // CONTROLES DE TRAVAMENTO DE MOUSE
+    // 4. SISTEMA DE INIMIGOS (AVIÕES)
+    function spawnEnemy() {
+        const enemyGeo = new THREE.BoxGeometry(15, 3, 6);
+        const enemyMat = new THREE.MeshPhongMaterial({ color: 0xff0000, emissive: 0x440000 });
+        const enemy = new THREE.Mesh(enemyGeo, enemyMat);
+        enemy.position.set(Math.random() * 500 - 250, 50 + Math.random() * 40, -800);
+        scene.add(enemy);
+        enemies.push(enemy);
+    }
+    setInterval(spawnEnemy, 2500);
+
+    // CONTROLES
     window.addEventListener('keydown', (e) => {
         keys[e.code] = true;
         if (e.key === '1') renderer.domElement.requestPointerLock();
@@ -85,25 +122,22 @@
             document.getElementById('crosshair').style.display = isOperating ? 'block' : 'none';
         }
     });
-
     window.addEventListener('keyup', (e) => keys[e.code] = false);
 
-    // MOVIMENTO DO MOUSE (GIRA A VISÃO)
     document.addEventListener('mousemove', (e) => {
         if (document.pointerLockElement === renderer.domElement) {
-            rotationY -= e.movementX * 0.002;
-            rotationX -= e.movementY * 0.002;
-            rotationX = Math.max(-0.5, Math.min(0.5, rotationX)); // Limita o olhar
+            yaw -= e.movementX * 0.002;
+            pitch -= e.movementY * 0.002;
+            pitch = Math.max(-0.6, Math.min(0.6, pitch));
         }
     });
 
-    // SISTEMA DE TIRO
     window.addEventListener('mousedown', () => {
         if (isOperating && myTurret) {
-            const b = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({color: 0x00ff00}));
+            const b = new THREE.Mesh(new THREE.SphereGeometry(0.6), new THREE.MeshBasicMaterial({color: 0x00ff00}));
             b.position.setFromMatrixPosition(firePoint.matrixWorld);
             const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(myTurret.quaternion);
-            bullets.push({ mesh: b, vel: dir.multiplyScalar(7) });
+            bullets.push({ mesh: b, vel: dir.multiplyScalar(10) });
             scene.add(b);
         }
     });
@@ -116,37 +150,46 @@
         if (mixer) mixer.update(delta);
 
         if (soldier && !isOperating) {
-            // Movimentação baseada na rotação do mouse
+            soldier.rotation.y = yaw;
             if (keys['KeyW']) soldier.translateZ(0.2);
-            if (keys['KeyS']) soldier.translateZ(-0.1);
-            if (keys['KeyA']) soldier.translateX(0.1);
-            if (keys['KeyD']) soldier.translateX(-0.1);
+            if (keys['KeyS']) soldier.translateZ(-0.15);
+            if (keys['KeyA']) soldier.translateX(0.15);
+            if (keys['KeyD']) soldier.translateX(-0.15);
 
-            soldier.rotation.y = rotationY;
-
-            // Câmera Terceira Pessoa (Visão do soldado)
-            const camOffset = new THREE.Vector3(4, 15, -25).applyQuaternion(soldier.quaternion);
-            camera.position.lerp(soldier.position.clone().add(camOffset), 0.1);
+            const camPos = new THREE.Vector3(6, 14, -25).applyQuaternion(soldier.quaternion);
+            camera.position.lerp(soldier.position.clone().add(camPos), 0.1);
             camera.lookAt(soldier.position.x, soldier.position.y + 10, soldier.position.z);
         }
 
         if (isOperating && myTurret) {
-            myTurret.rotation.y = rotationY;
-            // Visão de dentro da arma
-            const turretCam = new THREE.Vector3(0, 12, 5).applyMatrix4(myTurret.matrixWorld);
-            camera.position.copy(turretCam);
-            camera.lookAt(new THREE.Vector3(0, 10 + (rotationX * 50), -100).applyMatrix4(myTurret.matrixWorld));
+            myTurret.rotation.y = yaw;
+            const tCam = new THREE.Vector3(0, 13, 5).applyMatrix4(myTurret.matrixWorld);
+            camera.position.copy(tCam);
+            camera.lookAt(new THREE.Vector3(0, 10 + (pitch * 60), -100).applyMatrix4(myTurret.matrixWorld));
         }
 
-        // Atualizar Balas
-        bullets.forEach((b, i) => {
-            b.mesh.position.add(b.vel);
-            if(b.mesh.position.length() > 1000) {
-                scene.remove(b.mesh);
-                bullets.splice(i, 1);
+        // Movimento de Inimigos e Balas
+        enemies.forEach((en, i) => {
+            en.position.z += 2.5;
+            if (en.position.z > 200) {
+                scene.remove(en);
+                enemies.splice(i, 1);
             }
         });
 
+        bullets.forEach((b, bi) => {
+            b.mesh.position.add(b.vel);
+            enemies.forEach((en, ei) => {
+                if (b.mesh.position.distanceTo(en.position) < 15) {
+                    scene.remove(en);
+                    scene.remove(b.mesh);
+                    enemies.splice(ei, 1);
+                    bullets.splice(bi, 1);
+                }
+            });
+        });
+
+        document.getElementById('count').innerText = enemies.length;
         renderer.render(scene, camera);
     }
     animate();
