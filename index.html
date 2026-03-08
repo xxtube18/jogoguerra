@@ -2,24 +2,20 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Defesa Litorânea - Comando Operacional</title>
+    <title>Defesa Litorânea - Versão Corrigida</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; color: #0f0; font-family: 'Courier New', monospace; }
-        #hud { position: absolute; top: 20px; left: 20px; border: 2px solid #0f0; padding: 15px; background: rgba(0,10,0,0.9); pointer-events: none; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 25px; height: 25px; border: 2px solid #f00; transform: translate(-50%, -50%); border-radius: 50%; display: none; z-index: 5; }
-        #instrucoes { position: absolute; bottom: 20px; width: 100%; text-align: center; color: #fff; font-size: 14px; }
+        body { margin: 0; overflow: hidden; background: #000; }
+        #hud { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; background: rgba(0,0,0,0.7); padding: 10px; border: 1px solid #0f0; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; border: 2px solid #f00; border-radius: 50%; transform: translate(-50%, -50%); display: none; }
     </style>
 </head>
 <body>
 
 <div id="hud">
-    <div style="font-weight: bold;">COMANDO DE DEFESA LITORÂNEA</div>
-    <hr>
-    <div>STATUS: <span id="status">PATRULHANDO (FPS)</span></div>
-    <div>ALVOS: <span id="inimigos">0</span></div>
+    <div>MODO: <span id="modo">SOLDADO (3ª PESSOA)</span></div>
+    <div>TECLAS: [W,A,S,D] ANDAR | [E] USAR ARMA | [CLIQUE] ATIRAR</div>
 </div>
 <div id="crosshair"></div>
-<div id="instrucoes">[W,A,S,D] ANDAR | [MOUSE] OLHAR | [E] OPERAR ARMA</div>
 
 <script type="importmap">
     { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -30,179 +26,137 @@
     import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
     import { OBJLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
     import { MTLLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
-    import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
 
-    // ==========================================
-    // ÁREA DE CONFIGURAÇÃO (DEFINA AS POSIÇÕES AQUI)
-    // ==========================================
-    const CONFIG_DEFESA = {
-        minhaArma: { x: 0, z: -10 },
+    // 1. CONFIGURAÇÃO DE ONDE CADA COISA VAI FICAR
+    const CONFIG = {
+        minhaArma: { x: 0, y: -5, z: -10 },
         aliados: [
-            { x: 80, z: -20 },  // Posição Aliado Direita
-            { x: -80, z: -20 }  // Posição Aliado Esquerda
+            { x: 60, y: -5, z: -20 },
+            { x: -60, y: -5, z: -20 }
         ],
-        personagemSpawn: { x: 0, y: -4.5, z: 20 },
-        ondas: { qtd: 15, velocidade: 2.0 }
+        pessoal: { x: 0, y: -5, z: 20 }
     };
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000205); // Céu Noturno
-    scene.fog = new THREE.FogExp2(0x000205, 0.005);
-
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
+    scene.background = new THREE.Color(0x000205); // Céu Noite
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // ILUMINAÇÃO (LUZ DA LUA)
-    const moonlight = new THREE.DirectionalLight(0xaabbff, 0.8);
-    moonlight.position.set(50, 100, 50);
-    scene.add(moonlight);
-    scene.add(new THREE.AmbientLight(0x404040, 0.5));
+    // Iluminação
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const luzLuar = new THREE.DirectionalLight(0xffffff, 1);
+    luzLuar.position.set(10, 50, 10);
+    scene.add(luzLuar);
 
-    // CRIAÇÃO DA PRAIA (CHÃO)
-    const sandGeo = new THREE.PlaneGeometry(2000, 2000);
-    const sandMat = new THREE.MeshStandardMaterial({ color: 0xc2b280, roughness: 0.8 }); // Areia
-    const beach = new THREE.Mesh(sandGeo, sandMat);
-    beach.rotation.x = -Math.PI / 2;
-    beach.position.y = -5.1;
-    scene.add(beach);
+    // Praia
+    const areia = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshStandardMaterial({color: 0xc2b280}));
+    areia.rotation.x = -Math.PI/2;
+    areia.position.y = -5.05;
+    scene.add(areia);
 
-    // CONTROLES E PERSONAGEM
-    const controls = new PointerLockControls(camera, document.body);
-    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-    let velocity = new THREE.Vector3();
-    let direction = new THREE.Vector3();
-    let isOperating = false;
-
-    // CARREGADORES
-    const gltfLoader = new GLTFLoader();
-    const mtlLoader = new MTLLoader();
+    const loader = new GLTFLoader();
     const objLoader = new OBJLoader();
+    const mtlLoader = new MTLLoader();
 
-    let myTurret, turretPivot;
-    let militaryMan, soldierBody; // Referências do personagem 3D
-    let enemies = [];
+    let soldado, armaPrincipal, firePoint;
+    let operando = false;
+    let balas = [];
+    let teclado = {};
 
-    // 1. CARREGAR CENÁRIO (STAGE DESIGN)
+    // CARREGAR SOLDADO
+    loader.load('./Military man.glb', (gltf) => {
+        soldado = gltf.scene;
+        soldado.scale.set(3, 3, 3);
+        soldado.position.set(CONFIG.pessoal.x, CONFIG.pessoal.y, CONFIG.pessoal.z);
+        scene.add(soldado);
+    });
+
+    // CARREGAR ARMA (COM PONTO DE TIRO)
+    loader.load('./Missile Turret.glb', (gltf) => {
+        armaPrincipal = gltf.scene;
+        armaPrincipal.scale.set(4, 4, 4);
+        armaPrincipal.position.set(CONFIG.minhaArma.x, CONFIG.minhaArma.y, CONFIG.minhaArma.z);
+        
+        // Criar o ponto de onde sai a bala
+        firePoint = new THREE.Group();
+        firePoint.position.set(0, 5, -5); // Ajustado para a ponta do canhão
+        armaPrincipal.add(firePoint);
+        
+        scene.add(armaPrincipal);
+    });
+
+    // CENÁRIO OBJ
     mtlLoader.load('./stage design.mtl', (mtl) => {
         mtl.preload();
         objLoader.setMaterials(mtl).load('./stage design.obj', (obj) => {
-            obj.scale.set(0.4, 0.4, 0.4);
+            obj.scale.set(0.5, 0.5, 0.5);
             obj.position.y = -5;
             scene.add(obj);
         });
     });
 
-    // 2. CARREGAR MILITARY MAN (SEU PERSONAGEM)
-    gltfLoader.load('./Military man.glb', (gltf) => {
-        militaryMan = gltf.scene;
-        militaryMan.scale.set(3, 3, 3);
-        militaryMan.position.set(CONFIG_DEFESA.personagemSpawn.x, CONFIG_DEFESA.personagemSpawn.y, CONFIG_DEFESA.personagemSpawn.z);
-        scene.add(militaryMan);
-        soldierBody = militaryMan;
-    });
-
-    // 3. FUNÇÃO PARA CRIAR ARMAS
-    function spawnTurret(x, z, isPlayer) {
-        gltfLoader.load('./Missile Turret.glb', (gltf) => {
-            const base = gltf.scene;
-            base.position.set(x, -5, z);
-            base.scale.set(4, 4, 4);
-            
-            const pivot = new THREE.Group();
-            pivot.position.y = 4;
-            base.add(pivot);
-
-            if(isPlayer) {
-                myTurret = base;
-                turretPivot = pivot;
-            } else {
-                base.userData.isAlly = true;
-            }
-            scene.add(base);
-        });
-    }
-
-    spawnTurret(CONFIG_DEFESA.minhaArma.x, CONFIG_DEFESA.minhaArma.z, true);
-    CONFIG_DEFESA.aliados.forEach(p => spawnTurret(p.x, p.z, false));
-
-    // LOGICA DE TECLAS E ENTRADA
-    document.addEventListener('click', () => { if(!isOperating) controls.lock(); });
-
-    window.addEventListener('keydown', (e) => {
+    // EVENTOS
+    window.addEventListener('keydown', (e) => { 
+        teclado[e.code] = true;
         if(e.code === 'KeyE') {
-            isOperating = !isOperating;
-            if(isOperating && myTurret) {
-                controls.unlock();
-                document.getElementById('status').innerText = "OPERANDO ARMA (FPS)";
-                document.getElementById('crosshair').style.display = 'block';
-                if(soldierBody) soldierBody.visible = false; // Esconde o corpo ao entrar
-            } else {
-                controls.lock();
-                document.getElementById('status').innerText = "PATRULHANDO (FPS)";
-                document.getElementById('crosshair').style.display = 'none';
-                if(soldierBody) {
-                    soldierBody.visible = true; // Mostra o corpo ao sair
-                    // Posiciona o soldado atrás da arma
-                    const turretOffset = new THREE.Vector3(0, 0.5, 8).applyMatrix4(myTurret.matrixWorld);
-                    soldierBody.position.copy(turretOffset);
-                }
-            }
+            operando = !operando;
+            document.getElementById('modo').innerText = operando ? "NA TURRET" : "SOLDADO (3ª PESSOA)";
+            document.getElementById('crosshair').style.display = operando ? "block" : "none";
         }
-        switch (e.code) {
-            case 'KeyW': moveForward = true; break;
-            case 'KeyA': moveLeft = true; break;
-            case 'KeyS': moveBackward = true; break;
-            case 'KeyD': moveRight = true; break;
+    });
+    window.addEventListener('keyup', (e) => teclado[e.code] = false);
+
+    // DISPARAR
+    window.addEventListener('mousedown', () => {
+        if(operando && armaPrincipal) {
+            const bala = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color: 0x00ff00}));
+            bala.position.setFromMatrixPosition(firePoint.matrixWorld);
+            
+            const direcao = new THREE.Vector3(0, 0, -1).applyQuaternion(armaPrincipal.quaternion);
+            balas.push({ mesh: bala, vel: direcao.multiplyScalar(6) });
+            scene.add(bala);
         }
     });
 
-    window.addEventListener('keyup', (e) => {
-        switch (e.code) {
-            case 'KeyW': moveForward = false; break;
-            case 'KeyA': moveLeft = false; break;
-            case 'KeyS': moveBackward = false; break;
-            case 'KeyD': moveRight = false; break;
-        }
-    });
-
-    // LOOP DE ANIMAÇÃO
-    let prevTime = performance.now();
     function animate() {
         requestAnimationFrame(animate);
-        const time = performance.now();
-        const delta = (time - prevTime) / 1000;
 
-        // Se estiver operando a arma, a câmera trava nela
-        if (isOperating && myTurret) {
-            const camPos = new THREE.Vector3(0, 10, 0).applyMatrix4(myTurret.matrixWorld);
-            camera.position.lerp(camPos, 0.1);
-        } else {
-            // Movimentação do Personagem
-            velocity.x -= velocity.x * 10.0 * delta;
-            velocity.z -= velocity.z * 10.0 * delta;
+        if(soldado && !operando) {
+            // MOVIMENTO 3ª PESSOA
+            if(teclado['KeyW']) soldado.translateZ(0.4);
+            if(teclado['KeyS']) soldado.translateZ(-0.4);
+            if(teclado['KeyA']) soldado.rotation.y += 0.04;
+            if(teclado['KeyD']) soldado.rotation.y -= 0.04;
 
-            direction.z = Number(moveForward) - Number(moveBackward);
-            direction.x = Number(moveRight) - Number(moveLeft);
-            direction.normalize();
-
-            if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
-            if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
-
-            if (soldierBody && controls.isLocked) {
-                controls.moveRight(-velocity.x * delta);
-                controls.moveForward(-velocity.z * delta);
-                
-                // Sincroniza o modelo 3D com a câmera
-                militaryMan.position.copy(camera.position);
-                militaryMan.position.y = CONFIG_DEFESA.personagemSpawn.y;
-                militaryMan.rotation.y = camera.rotation.y + Math.PI; // Ajuste para o soldado olhar para frente
-            }
+            // Câmara atrás do soldado
+            const dist = new THREE.Vector3(0, 15, -35).applyQuaternion(soldado.quaternion);
+            camera.position.lerp(soldado.position.clone().add(dist), 0.1);
+            camera.lookAt(soldado.position.x, soldado.position.y + 10, soldado.position.z);
         }
 
+        if(operando && armaPrincipal) {
+            // CONTROLE DA ARMA
+            if(teclado['KeyA']) armaPrincipal.rotation.y += 0.03;
+            if(teclado['KeyD']) armaPrincipal.rotation.y -= 0.03;
+
+            // Câmara na mira
+            const alvoMira = new THREE.Vector3(0, 12, 0).applyMatrix4(armaPrincipal.matrixWorld);
+            camera.position.lerp(alvoMira, 0.1);
+            camera.lookAt(new THREE.Vector3(0, 10, -100).applyMatrix4(armaPrincipal.matrixWorld));
+        }
+
+        // MOVER BALAS
+        balas.forEach((b, i) => {
+            b.mesh.position.add(b.vel);
+            if(b.mesh.position.z < -1000) {
+                scene.remove(b.mesh);
+                balas.splice(i, 1);
+            }
+        });
+
         renderer.render(scene, camera);
-        prevTime = time;
     }
     animate();
 </script>
